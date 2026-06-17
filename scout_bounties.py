@@ -36,6 +36,12 @@ BLOCKLIST = [
     "phishing", "spam", "scam",
 ]
 
+# ─── Repo blocklist (farming repos, self-repo) ────────────────────────────────
+REPO_BLOCKLIST = [
+    "SecureBananaLabs/bug-bounty",  # farming repo — bulk fake issues
+    "greyw0rks/bountyscout",        # self — bot's own alert issues
+]
+
 
 def load_seen_bounties() -> set:
     if os.path.exists(STATE_FILE):
@@ -86,6 +92,11 @@ def is_clean_candidate(item: dict) -> bool:
         return False
     # Skip overcrowded threads
     if int(item.get("comments", 0)) > MAX_COMMENTS:
+        return False
+
+    # Skip blocked repos (farming accounts, self-repo)
+    repo = item.get("repository_url", "").replace("https://api.github.com/repos/", "")
+    if any(repo.lower() == blocked.lower() for blocked in REPO_BLOCKLIST):
         return False
 
     title = str(item.get("title", "")).lower()
