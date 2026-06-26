@@ -1,6 +1,7 @@
 import json
 import os
 import time
+import urllib.error
 import urllib.request
 import urllib.parse
 from datetime import datetime, timedelta, timezone
@@ -10,6 +11,7 @@ STATE_FILE = "seen_bounties.json"
 MAX_COMMENTS = 25  # skip overcrowded / already-competitive threads
 MAX_LINKED_PRS = 1
 RECENT_WINDOW_HOURS = 1
+TELEGRAM_MESSAGE_LIMIT = 3500
 
 # ─── Search Queries ───────────────────────────────────────────────────────────
 # Tuned for Web3 / hackathon / open-source bounty opportunities
@@ -206,25 +208,54 @@ def is_clean_candidate(item: dict) -> bool:
 
 # ─── Notification senders ─────────────────────────────────────────────────────
 
+def chunk_lines(lines: list[str], limit: int = TELEGRAM_MESSAGE_LIMIT) -> list[str]:
+    chunks: list[str] = []
+    current: list[str] = []
+    current_len = 0
+
+    for line in lines:
+        line_len = len(line) + (1 if current else 0)
+        if current and current_len + line_len > limit:
+            chunks.append("\n".join(current))
+            current = [line]
+            current_len = len(line)
+            continue
+        current.append(line)
+        current_len += line_len
+
+    if current:
+        chunks.append("\n".join(current))
+
+    return chunks
+
+
 def send_telegram(token: str, chat_id: str, message: str):
     url = f"https://api.telegram.org/bot{token}/sendMessage"
-    payload = {
-        "chat_id": chat_id,
-        "text": message,
-        "parse_mode": "Markdown",
-        "disable_web_page_preview": False,
-    }
-    req = urllib.request.Request(
-        url,
-        data=json.dumps(payload).encode("utf-8"),
-        headers={"Content-Type": "application/json"},
-        method="POST",
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=10):
-            print("[OK] Telegram notification sent.")
-    except Exception as e:
-        print(f"[ERROR] Telegram failed: {e}")
+    sent_chunks = 0
+
+    for chunk in chunk_lines(message.splitlines()):
+        payload = {
+            "chat_id": chat_id,
+            "text": chunk,
+            "disable_web_page_preview": False,
+        }
+        req = urllib.request.Request(
+            url,
+            data=json.dumps(payload).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=10):
+                sent_chunks += 1
+        except urllib.error.HTTPError as e:
+            print(f"[ERROR] Telegram failed with HTTP {e.code}. Check TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID and message size.")
+            return
+        except Exception as e:
+            print(f"[ERROR] Telegram failed: {e}")
+            return
+
+    print(f"[OK] Telegram notification sent in {sent_chunks} chunk(s).")
 
 
 def send_discord(webhook_url: str, message: str):
@@ -242,33 +273,10 @@ def send_discord(webhook_url: str, message: str):
         print(f"[ERROR] Discord failed: {e}")
 
 
-def create_github_issue(repo: str, token: str, title: str, body: str):
-    url = f"https://api.github.com/repos/{repo}/issues"
-    payload = {"title": title, "body": body, "labels": ["bounty-alert"]}
-    headers = {
-        "Accept": "application/vnd.github+json",
-        "User-Agent": "greyw0rks-BountyScout",
-        "X-GitHub-Api-Version": "2022-11-28",
-        "Authorization": f"Bearer {token}",
-    }
-    req = urllib.request.Request(
-        url,
-        data=json.dumps(payload).encode("utf-8"),
-        headers=headers,
-        method="POST",
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=15):
-            print("[OK] GitHub Issue notification created.")
-    except Exception as e:
-        print(f"[ERROR] GitHub Issue creation failed: {e}")
-
-
 # ─── Main ─────────────────────────────────────────────────────────────────────
 
 def main():
     github_token    = os.environ.get("GITHUB_TOKEN")
-    repo_fullname   = os.environ.get("GITHUB_REPOSITORY")      # e.g. greyw0rks/BountyScout
     telegram_token  = os.environ.get("TELEGRAM_BOT_TOKEN")
     telegram_chat   = os.environ.get("TELEGRAM_CHAT_ID")
     discord_webhook = os.environ.get("DISCORD_WEBHOOK_URL")
@@ -316,16 +324,18 @@ def main():
 
     # ── Telegram / Discord message (Markdown) ────────────────────────────────
     lines = [
-        f"🎯 *Bounty Alert* — {now_str}",
-        f"Found *{count}* new opportunit{plural}:\n",
+        f"Bounty Alert - {now_str}",
+        f"Found {count} new opportunit{plural}:",
+        "",
     ]
     for i, b in enumerate(new_bounties, 1):
         lines += [
-            f"{i}. *{b['title']}*",
-            f"   • Repo: `{b['repo']}`",
-            f"   • Comments: {b['comments']}",
-            f"   • Linked PRs: {b['linked_prs']}",
-            f"   • Link: {b['url']}\n",
+            f"{i}. {b['title']}",
+            f"   - Repo: {b['repo']}",
+            f"   - Comments: {b['comments']}",
+            f"   - Linked PRs: {b['linked_prs']}",
+            f"   - Link: {b['url']}",
+            "",
         ]
     notif_msg = "\n".join(lines)
 
@@ -334,20 +344,6 @@ def main():
 
     if discord_webhook:
         send_discord(discord_webhook, notif_msg.replace("•", "-"))
-
-    # ── GitHub Issue (zero-config, uses built-in GITHUB_TOKEN) ───────────────
-    if github_token and repo_fullname:
-        issue_title = f"🎯 Bounty Alert: {count} New Opportunit{plural} — {now_str}"
-        issue_body  = f"### Bounty Scan Results\n\n**Scan Time:** {now_str}\n\n"
-        for i, b in enumerate(new_bounties, 1):
-            issue_body += (
-                f"#### {i}. [{b['title']}]({b['url']})\n"
-                f"- **Repo:** [{b['repo']}](https://github.com/{b['repo']})\n"
-                f"- **Comments:** {b['comments']}\n"
-                f"- **Linked PRs:** {b['linked_prs']}\n"
-                f"- **Last Updated:** {b['updated_at']}\n\n"
-            )
-        create_github_issue(repo_fullname, github_token, issue_title, issue_body)
 
     save_seen_bounties(seen_urls)
     print("💾 State saved.")

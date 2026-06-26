@@ -1,6 +1,6 @@
 # 🎯 BountyScout
 
-Automated GitHub bounty scanner — runs **hourly** via GitHub Actions, surfaces new paid bounty issues, and pings you once per bounty via GitHub Issues, Telegram, or Discord.
+Automated GitHub bounty scanner — runs **hourly** via GitHub Actions, surfaces new paid bounty issues, and pings you once per bounty via Telegram or Discord.
 
 Forked from [dev-kp-eloper/BountyScout](https://github.com/dev-kp-eloper/BountyScout) and tuned for Web3 / hackathon ecosystems (Hedera, Celo, Stacks, Base, Mantle, LangChain).
 
@@ -35,17 +35,15 @@ BountyScout/
 
 ### 2. Choose your notification channel
 
-#### Option A — GitHub Issues (zero config, recommended)
-The built-in `GITHUB_TOKEN` handles everything. Watch your repo and you'll get a native GitHub push notification per scan.
-
-#### Option B — Telegram
+#### Option A — Telegram
 1. Message `@BotFather` → `/newbot` → copy the **API Token**
 2. Send a message to your bot, then open `https://api.telegram.org/botTOKEN/getUpdates` and copy the numeric `chat.id`
 3. Add repo secrets:
    - `TELEGRAM_BOT_TOKEN`
    - `TELEGRAM_CHAT_ID`
+4. Large alert batches are automatically split into multiple Telegram messages.
 
-#### Option C — Discord
+#### Option B — Discord
 1. Channel Settings → Integrations → Webhooks → Create Webhook → copy URL
 2. Add repo secret: `DISCORD_WEBHOOK_URL`
 
