@@ -74,6 +74,10 @@ Issues are dropped if they contain any of: `airdrop`, `referral`, `casino`, `gam
 
 Edit `BLOCKLIST` in `scout_bounties.py` to tune.
 
+Issues are also dropped unless the title, body, or labels contain bounty-style signals such as `bounty`, `reward`, `paid`, `prize`, `grant`, `quest`, `mission`, or `hackathon`.
+
+Excluded labels currently include: `GRANTFOX OSS`, `GrantFox OSS campaign`, `MAYBE REWARDED`, `OFFICIAL CAMPAIGN`, `Stellar Wave`, and `drips-wave`.
+
 ---
 
 ## PR Threshold

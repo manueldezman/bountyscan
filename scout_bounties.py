@@ -74,6 +74,32 @@ BLOCKLIST = [
     "phishing", "spam", "scam",
 ]
 
+# ─── Required bounty signal + excluded labels ─────────────────────────────────
+STRONG_BOUNTY_TERMS = [
+    "reward", "rewards", "paid", "prize", "prizes", "grant", "grants",
+    "payment", "payments", "paying", "payout", "payouts", "compensation",
+    "compensated", "stipend", "stipends", "hackathon", "up for grabs",
+    "opire", "gitcoin", "superfluid", "dework",
+]
+
+BOUNTY_CONTEXT_TERMS = [
+    "bounty", "bounties", "quest", "quests", "mission", "missions",
+    "challenge", "challenges",
+]
+
+MONETARY_HINTS = [
+    "$", " usd", "usdc", "usdt", "btc", "eth", "sol", "hbar", "matic",
+]
+
+EXCLUDED_LABELS = [
+    "grantfox oss",
+    "grantfox oss campaign",
+    "maybe rewarded",
+    "official campaign",
+    "stellar wave",
+    "drips-wave",
+]
+
 # ─── Repo blocklist (farming repos, self-repo) ────────────────────────────────
 REPO_BLOCKLIST = [
     "SecureBananaLabs/bug-bounty",  # farming repo — bulk fake issues
@@ -181,6 +207,37 @@ def passes_recency_and_pr_rules(item: dict, linked_prs: int, now: datetime) -> b
     return linked_prs == 0
 
 
+def extract_label_names(item: dict) -> list[str]:
+    labels = item.get("labels", [])
+    names: list[str] = []
+    for label in labels:
+        name = str(label.get("name", "")).strip().lower()
+        if name:
+            names.append(name)
+    return names
+
+
+def has_bounty_signal(item: dict) -> bool:
+    title = str(item.get("title", "")).lower()
+    body = str(item.get("body", "") or "").lower()
+    label_names = extract_label_names(item)
+    labels_text = " ".join(label_names)
+    searchable = " ".join([title, body, labels_text])
+
+    if any(term in searchable for term in STRONG_BOUNTY_TERMS):
+        return True
+
+    if any(label in {"bounty", "bounties", "reward", "rewards", "paid", "grant", "grants"} for label in label_names):
+        return True
+
+    has_context = any(term in searchable for term in BOUNTY_CONTEXT_TERMS)
+    has_companion = (
+        any(term in searchable for term in STRONG_BOUNTY_TERMS)
+        or any(term in searchable for term in MONETARY_HINTS)
+    )
+    return has_context and has_companion
+
+
 def is_clean_candidate(item: dict) -> bool:
     # Skip pull requests
     if "pull_request" in item:
@@ -199,8 +256,15 @@ def is_clean_candidate(item: dict) -> bool:
 
     title = str(item.get("title", "")).lower()
     body = str(item.get("body", "") or "").lower()
+    label_names = extract_label_names(item)
+
+    if any(label in EXCLUDED_LABELS for label in label_names):
+        return False
 
     if any(term in title or term in body for term in BLOCKLIST):
+        return False
+
+    if not has_bounty_signal(item):
         return False
 
     return True
