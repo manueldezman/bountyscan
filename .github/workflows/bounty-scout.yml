@@ -2,8 +2,8 @@ name: Scout Active Bounties Hourly
 
 on:
   schedule:
-    # Runs at minute 0 of every hour
-    - cron: '0 * * * *'
+    # Runs at minute 17 of every hour to avoid the busiest scheduler window
+    - cron: '17 * * * *'
   workflow_dispatch: # Allow manual trigger from Actions tab
 
 permissions:

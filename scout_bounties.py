@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import time
 import urllib.error
 import urllib.request
@@ -16,56 +17,34 @@ TELEGRAM_MESSAGE_LIMIT = 3500
 # ─── Search Queries ───────────────────────────────────────────────────────────
 # Tuned for Web3 / hackathon / open-source bounty opportunities
 SEARCH_QUERIES = [
-    # Generic paid bounty issues
-    'is:issue is:open bounty in:title,body sort:updated-desc',
-    'is:issue is:open reward bounty sort:updated-desc',
-    'is:issue is:open "paid" "PR" "bounty" sort:updated-desc',
-    # Alternative naming conventions platforms use instead of "bounty"
-    'is:issue is:open mission in:title reward sort:updated-desc',
-    'is:issue is:open mission in:title prize sort:updated-desc',
-    'is:issue is:open "quest" reward in:title,body sort:updated-desc',
-    'is:issue is:open "challenge" prize in:title,body sort:updated-desc',
-    'is:issue is:open "task" reward "open" sort:updated-desc',
-    'is:issue is:open "open task" reward sort:updated-desc',
-    'is:issue is:open "wanted" reward "$" sort:updated-desc',
+    # Generic explicit-paid bounty issues
+    'is:issue is:open bounty reward sort:updated-desc',
+    'is:issue is:open bounty paid sort:updated-desc',
+    'is:issue is:open bounty prize sort:updated-desc',
+    'is:issue is:open bounty grant sort:updated-desc',
+    'is:issue is:open bounty payout sort:updated-desc',
+    'is:issue is:open bounty payment sort:updated-desc',
     'is:issue is:open "paid issue" sort:updated-desc',
     'is:issue is:open "up for grabs" reward sort:updated-desc',
-    # Opire bounty platform
-    'is:issue is:open "Opire" bounty sort:updated-desc',
-    # Gitcoin / Superfluid / protocol-specific bounty platforms
-    'is:issue is:open "gitcoin" bounty sort:updated-desc',
-    'is:issue is:open "superfluid" bounty sort:updated-desc',
+    'is:issue is:open reward "$" sort:updated-desc',
+    'is:issue is:open reward usdc sort:updated-desc',
+    'is:issue is:open reward eth sort:updated-desc',
+    # Platform / ecosystem paid work patterns
+    'is:issue is:open "Opire" reward sort:updated-desc',
+    'is:issue is:open "gitcoin" grant sort:updated-desc',
+    'is:issue is:open "superfluid" bounty reward sort:updated-desc',
     'is:issue is:open "dework" task reward sort:updated-desc',
-    # Web3 / blockchain ecosystem grants & bounties
-    'is:issue is:open "HBAR" bounty sort:updated-desc',
-    'is:issue is:open "Hedera" bounty sort:updated-desc',
-    'is:issue is:open "Celo" bounty sort:updated-desc',
-    'is:issue is:open "Stacks" bounty sort:updated-desc',
-    'is:issue is:open "Base" bounty sort:updated-desc',
-    'is:issue is:open "Mantle" bounty sort:updated-desc',
-    'is:issue is:open "Arbitrum" bounty sort:updated-desc',
-    'is:issue is:open "Polygon" bounty sort:updated-desc',
-    'is:issue is:open "Solana" bounty sort:updated-desc',
-    'is:issue is:open "Near" bounty sort:updated-desc',
-    'is:issue is:open "Avalanche" bounty sort:updated-desc',
-    'is:issue is:open "ICP" bounty sort:updated-desc',
-    # Intuition.box / reality tunnel style missions
-    'is:issue is:open "intuition" mission in:title,body sort:updated-desc',
-    'is:issue is:open mission "mainnet" reward sort:updated-desc',
-    # Dev tooling / AI bounties
     'is:issue is:open hackathon prize "TypeScript" sort:updated-desc',
-    'is:issue is:open "LangChain" bounty sort:updated-desc',
-    'is:issue is:open "LangGraph" bounty sort:updated-desc',
     'is:issue is:open grant "open source" "good first issue" sort:updated-desc',
     'is:issue is:open "AI agent" bounty reward sort:updated-desc',
-    'is:issue is:open "MCP" bounty sort:updated-desc',
-    # Targeted coverage for codegraphtheory bounty-style issues
-    'is:issue is:open repo:codegraphtheory/hermes-profile-template bounty sort:updated-desc',
-    'is:issue is:open repo:codegraphtheory/hermes-profile-template reward sort:updated-desc',
-    'is:issue is:open repo:codegraphtheory/hermes-profile-template mission prize sort:updated-desc',
-    'is:issue is:open user:codegraphtheory bounty sort:updated-desc',
-    'is:issue is:open user:codegraphtheory reward sort:updated-desc',
-    'is:issue is:open user:codegraphtheory mission prize sort:updated-desc',
+    'is:issue is:open "MCP" bounty reward sort:updated-desc',
+    # Targeted coverage for codegraphtheory paid issues
+    'is:issue is:open repo:codegraphtheory/hermes-profile-template bounty reward sort:updated-desc',
+    'is:issue is:open repo:codegraphtheory/hermes-profile-template bounty paid sort:updated-desc',
+    'is:issue is:open repo:codegraphtheory/hermes-profile-template grant prize sort:updated-desc',
+    'is:issue is:open user:codegraphtheory bounty reward sort:updated-desc',
+    'is:issue is:open user:codegraphtheory bounty paid sort:updated-desc',
+    'is:issue is:open user:codegraphtheory grant prize sort:updated-desc',
 ]
 
 # ─── Spam / noise blocklist ───────────────────────────────────────────────────
@@ -91,6 +70,12 @@ MONETARY_HINTS = [
     "$", " usd", "usdc", "usdt", "btc", "eth", "sol", "hbar", "matic",
 ]
 
+WORK_CUE_TERMS = [
+    "fix", "build", "implement", "create", "write", "ship", "deliver",
+    "task", "issue", "feature", "integration", "documentation", "tutorial",
+    "article", "pr", "pull request", "bug",
+]
+
 EXCLUDED_LABELS = [
     "grantfox oss",
     "grantfox oss campaign",
@@ -100,11 +85,21 @@ EXCLUDED_LABELS = [
     "drips-wave",
 ]
 
+FALSE_POSITIVE_PATTERNS = [
+    "bounty alert:",
+    "create bounty fails",
+    "dummy test quest",
+    "dummy quest",
+]
+
 # ─── Repo blocklist (farming repos, self-repo) ────────────────────────────────
 REPO_BLOCKLIST = [
     "SecureBananaLabs/bug-bounty",  # farming repo — bulk fake issues
     "greyw0rks/bountyscout",        # self — bot's own alert issues
+    "dev-kp-eloper/bountyscout",    # upstream alert repo
 ]
+
+TICKER_STATUS_RE = re.compile(r"^[^\w]*[A-Z]{2,5}\s+[—-]\s+\d{4}-\d{2}-\d{2}\s+\(OK\)$")
 
 
 def load_seen_bounties() -> set:
@@ -224,18 +219,19 @@ def has_bounty_signal(item: dict) -> bool:
     labels_text = " ".join(label_names)
     searchable = " ".join([title, body, labels_text])
 
-    if any(term in searchable for term in STRONG_BOUNTY_TERMS):
-        return True
-
-    if any(label in {"bounty", "bounties", "reward", "rewards", "paid", "grant", "grants"} for label in label_names):
-        return True
-
-    has_context = any(term in searchable for term in BOUNTY_CONTEXT_TERMS)
-    has_companion = (
+    has_payment = (
         any(term in searchable for term in STRONG_BOUNTY_TERMS)
         or any(term in searchable for term in MONETARY_HINTS)
     )
-    return has_context and has_companion
+    has_context = any(term in searchable for term in BOUNTY_CONTEXT_TERMS)
+    has_paid_label = any(label in {"reward", "rewards", "paid", "grant", "grants", "prize", "prizes"} for label in label_names)
+    has_bounty_label = any(label in {"bounty", "bounties"} for label in label_names)
+    has_work_cue = any(term in searchable for term in WORK_CUE_TERMS)
+
+    if not has_payment and not has_paid_label:
+        return False
+
+    return has_context or has_bounty_label or has_work_cue
 
 
 def is_clean_candidate(item: dict) -> bool:
@@ -257,11 +253,21 @@ def is_clean_candidate(item: dict) -> bool:
     title = str(item.get("title", "")).lower()
     body = str(item.get("body", "") or "").lower()
     label_names = extract_label_names(item)
+    searchable = " ".join([title, body, " ".join(label_names)])
 
     if any(label in EXCLUDED_LABELS for label in label_names):
         return False
 
     if any(term in title or term in body for term in BLOCKLIST):
+        return False
+
+    if any(pattern in searchable for pattern in FALSE_POSITIVE_PATTERNS):
+        return False
+
+    if title.startswith("epic:"):
+        return False
+
+    if TICKER_STATUS_RE.match(str(item.get("title", "")).strip()):
         return False
 
     if not has_bounty_signal(item):
@@ -348,21 +354,33 @@ def main():
     seen_urls = load_seen_bounties()
     new_bounties: list[dict] = []
     now = datetime.now(timezone.utc)
+    stats = {
+        "queries": len(SEARCH_QUERIES),
+        "raw_matches": 0,
+        "seen_skips": 0,
+        "noise_rejections": 0,
+        "pr_rejections": 0,
+        "accepted": 0,
+    }
 
     print(f"🔍 Scouting GitHub for active bounties with recent updates or zero linked PRs...")
     for query in SEARCH_QUERIES:
         results = search_github(query, github_token)
         time.sleep(2)  # stay under GitHub Search API rate limit (30 req/min)
         for item in results.get("items", []):
+            stats["raw_matches"] += 1
             url = item.get("html_url")
             if not url or url in seen_urls:
+                stats["seen_skips"] += 1
                 continue
             if not is_clean_candidate(item):
+                stats["noise_rejections"] += 1
                 continue
 
             linked_prs = count_linked_prs(item, github_token)
             time.sleep(1)
             if not passes_recency_and_pr_rules(item, linked_prs, now):
+                stats["pr_rejections"] += 1
                 continue
 
             if url:
@@ -375,6 +393,17 @@ def main():
                     "updated_at": item.get("updated_at"),
                 })
                 seen_urls.add(url)
+                stats["accepted"] += 1
+
+    print(
+        "[INFO] Scan summary: "
+        f"queries={stats['queries']} "
+        f"raw_matches={stats['raw_matches']} "
+        f"seen_skips={stats['seen_skips']} "
+        f"noise_rejections={stats['noise_rejections']} "
+        f"pr_rejections={stats['pr_rejections']} "
+        f"accepted={stats['accepted']}"
+    )
 
     if not new_bounties:
         print("✅ No new bounties found this run.")
