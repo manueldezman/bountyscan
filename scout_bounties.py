@@ -3,11 +3,13 @@ import os
 import time
 import urllib.request
 import urllib.parse
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 # ─── Configuration ────────────────────────────────────────────────────────────
 STATE_FILE = "seen_bounties.json"
 MAX_COMMENTS = 25  # skip overcrowded / already-competitive threads
+MAX_LINKED_PRS = 1
+RECENT_WINDOW_HOURS = 1
 
 # ─── Search Queries ───────────────────────────────────────────────────────────
 # Tuned for Web3 / hackathon / open-source bounty opportunities
@@ -55,12 +57,18 @@ SEARCH_QUERIES = [
     'is:issue is:open grant "open source" "good first issue" sort:updated-desc',
     'is:issue is:open "AI agent" bounty reward sort:updated-desc',
     'is:issue is:open "MCP" bounty sort:updated-desc',
+    # Targeted coverage for codegraphtheory bounty-style issues
+    'is:issue is:open repo:codegraphtheory/hermes-profile-template bounty sort:updated-desc',
+    'is:issue is:open repo:codegraphtheory/hermes-profile-template reward sort:updated-desc',
+    'is:issue is:open repo:codegraphtheory/hermes-profile-template mission prize sort:updated-desc',
+    'is:issue is:open user:codegraphtheory bounty sort:updated-desc',
+    'is:issue is:open user:codegraphtheory reward sort:updated-desc',
+    'is:issue is:open user:codegraphtheory mission prize sort:updated-desc',
 ]
 
 # ─── Spam / noise blocklist ───────────────────────────────────────────────────
 BLOCKLIST = [
     "airdrop", "referral", "casino", "gambling", "trading bot",
-    "blog post", "article writing", "tutorial proposal", "content creator",
     "phishing", "spam", "scam",
 ]
 
@@ -109,6 +117,66 @@ def search_github(query: str, token: str | None) -> dict:
     except Exception as e:
         print(f"[ERROR] GitHub API failed for query '{query[:60]}': {e}")
         return {}
+
+
+def fetch_issue_timeline(repo: str, issue_number: int, token: str | None) -> list[dict]:
+    url = f"https://api.github.com/repos/{repo}/issues/{issue_number}/timeline"
+    headers = {
+        "Accept": "application/vnd.github+json",
+        "User-Agent": "greyw0rks-BountyScout",
+        "X-GitHub-Api-Version": "2022-11-28",
+    }
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+
+    req = urllib.request.Request(url, headers=headers)
+    try:
+        with urllib.request.urlopen(req, timeout=20) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+            return data if isinstance(data, list) else []
+    except Exception as e:
+        print(f"[WARN] Could not load timeline for {repo}#{issue_number}: {e}")
+        return []
+
+
+def count_linked_prs(item: dict, token: str | None) -> int:
+    repo = item.get("repository_url", "").replace("https://api.github.com/repos/", "")
+    issue_number = item.get("number")
+    if not repo or not issue_number:
+        return 0
+
+    linked_prs: set[str] = set()
+    for event in fetch_issue_timeline(repo, int(issue_number), token):
+        source_issue = event.get("source", {}).get("issue", {})
+        if not source_issue or "pull_request" not in source_issue:
+            continue
+        pr_ref = (
+            source_issue.get("repository_url", ""),
+            source_issue.get("number"),
+            source_issue.get("html_url", ""),
+        )
+        linked_prs.add(str(pr_ref))
+
+    return len(linked_prs)
+
+
+def was_updated_recently(item: dict, now: datetime, window_hours: int = RECENT_WINDOW_HOURS) -> bool:
+    updated_at = item.get("updated_at")
+    if not updated_at:
+        return False
+    try:
+        updated_dt = datetime.strptime(updated_at, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+    except ValueError:
+        return False
+
+    earliest_allowed = now - timedelta(hours=window_hours)
+    return earliest_allowed <= updated_dt <= now
+
+
+def passes_recency_and_pr_rules(item: dict, linked_prs: int, now: datetime) -> bool:
+    if was_updated_recently(item, now):
+        return linked_prs <= MAX_LINKED_PRS
+    return linked_prs == 0
 
 
 def is_clean_candidate(item: dict) -> bool:
@@ -207,19 +275,31 @@ def main():
 
     seen_urls = load_seen_bounties()
     new_bounties: list[dict] = []
+    now = datetime.now(timezone.utc)
 
-    print("🔍 Scouting GitHub for active bounties...")
+    print(f"🔍 Scouting GitHub for active bounties with recent updates or zero linked PRs...")
     for query in SEARCH_QUERIES:
         results = search_github(query, github_token)
         time.sleep(2)  # stay under GitHub Search API rate limit (30 req/min)
         for item in results.get("items", []):
             url = item.get("html_url")
-            if url and url not in seen_urls and is_clean_candidate(item):
+            if not url or url in seen_urls:
+                continue
+            if not is_clean_candidate(item):
+                continue
+
+            linked_prs = count_linked_prs(item, github_token)
+            time.sleep(1)
+            if not passes_recency_and_pr_rules(item, linked_prs, now):
+                continue
+
+            if url:
                 new_bounties.append({
                     "title":      item.get("title"),
                     "url":        url,
                     "repo":       url.split("/issues/")[0].replace("https://github.com/", ""),
                     "comments":   item.get("comments", 0),
+                    "linked_prs": linked_prs,
                     "updated_at": item.get("updated_at"),
                 })
                 seen_urls.add(url)
@@ -244,6 +324,7 @@ def main():
             f"{i}. *{b['title']}*",
             f"   • Repo: `{b['repo']}`",
             f"   • Comments: {b['comments']}",
+            f"   • Linked PRs: {b['linked_prs']}",
             f"   • Link: {b['url']}\n",
         ]
     notif_msg = "\n".join(lines)
@@ -263,6 +344,7 @@ def main():
                 f"#### {i}. [{b['title']}]({b['url']})\n"
                 f"- **Repo:** [{b['repo']}](https://github.com/{b['repo']})\n"
                 f"- **Comments:** {b['comments']}\n"
+                f"- **Linked PRs:** {b['linked_prs']}\n"
                 f"- **Last Updated:** {b['updated_at']}\n\n"
             )
         create_github_issue(repo_fullname, github_token, issue_title, issue_body)

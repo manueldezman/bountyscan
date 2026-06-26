@@ -9,8 +9,8 @@ Forked from [dev-kp-eloper/BountyScout](https://github.com/dev-kp-eloper/BountyS
 ## How It Works
 
 1. **Scheduled trigger** — GitHub Actions cron fires at `0 * * * *` (top of every hour).
-2. **Scouts GitHub** — Runs ~13 search queries across generic bounty keywords and Web3-specific terms.
-3. **Triages candidates** — Skips PRs, already-assigned issues, overcrowded threads (>25 comments), and spam keywords.
+2. **Scouts GitHub** — Runs targeted bounty searches, prioritizing issues updated in the last hour.
+3. **Triages candidates** — Skips PRs, already-assigned issues, overcrowded threads (>25 comments), spam keywords, and issues that fail the linked-PR recency rule.
 4. **Deduplicates** — Compares against `seen_bounties.json`; only surfaces truly new entries.
 5. **Notifies** — Dispatches via your configured channel(s).
 6. **Persists state** — Commits updated `seen_bounties.json` back to the repo so you never get duplicates.
@@ -57,20 +57,32 @@ Actions tab → **Scout Active Bounties Hourly** → **Run workflow**
 
 ## Search Keywords
 
-The scanner runs these query groups by default:
+The scanner runs these query groups by default, with searches biased toward issues updated in the last hour:
 
 | Category | Queries |
 |---|---|
 | Generic | `bounty`, `reward bounty`, `paid PR bounty`, `Opire bounty` |
 | Web3 | `HBAR bounty`, `Hedera bounty`, `Celo bounty`, `Stacks bounty`, `Base bounty`, `Mantle bounty` |
 | Dev tooling | `hackathon prize TypeScript`, `LangChain/LangGraph bounty`, `grant open source good first issue` |
+| Targeted repos | `repo:codegraphtheory/hermes-profile-template` + `user:codegraphtheory` bounty/reward/mission-prize searches |
 
-Edit `SEARCH_QUERIES` in `scout_bounties.py` to add or remove terms.
+Edit `SEARCH_QUERIES` in `scout_bounties.py` to add or remove terms. Adjust `RECENT_WINDOW_HOURS` if you want a different recent-issue window.
 
 ---
 
 ## Spam Filters
 
-Issues are dropped if they contain any of: `airdrop`, `referral`, `casino`, `gambling`, `trading bot`, `blog post`, `article writing`, `tutorial proposal`, `content creator`, `phishing`, `spam`, `scam`.
+Issues are dropped if they contain any of: `airdrop`, `referral`, `casino`, `gambling`, `trading bot`, `phishing`, `spam`, `scam`.
 
 Edit `BLOCKLIST` in `scout_bounties.py` to tune.
+
+---
+
+## PR Threshold
+
+The scanner uses GitHub issue timeline references to count linked pull requests:
+
+- Issues updated within the last hour are allowed with `0` or `1` linked PRs.
+- Issues older than 1 hour are only allowed with `0` linked PRs.
+
+Adjust `MAX_LINKED_PRS` or `RECENT_WINDOW_HOURS` in `scout_bounties.py` to change that behavior.
