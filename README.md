@@ -75,7 +75,7 @@ Issues are dropped if they contain any of: `airdrop`, `referral`, `casino`, `gam
 Edit `BLOCKLIST` in `scout_bounties.py` to tune.
 
 Issues are also dropped unless they contain explicit payment signals such as `reward`, `paid`, `prize`, `grant`, `payout`, `payment`, or a money/token amount. A `bounty` mention or label helps, but is not enough on its own.
-The current exception is `topoteretes/cognee` issues labeled `hackathon`, which are intentionally included as a targeted source.
+The current exception is `topoteretes/cognee` issues labeled `hackathon` with `0` comments, which are intentionally included as a targeted source.
 
 Excluded labels currently include: `GRANTFOX OSS`, `GrantFox OSS campaign`, `MAYBE REWARDED`, `OFFICIAL CAMPAIGN`, `Stellar Wave`, and `drips-wave`.
 Known false-positive patterns such as `Bounty Alert`, `Create Bounty fails`, dummy test quests, and stock ticker status posts are also rejected.

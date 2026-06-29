@@ -245,7 +245,7 @@ def is_targeted_hackathon_issue(item: dict) -> bool:
         return False
 
     label_names = extract_label_names(item)
-    return "hackathon" in label_names
+    return "hackathon" in label_names and int(item.get("comments", 0)) == 0
 
 
 def is_clean_candidate(item: dict) -> bool:
