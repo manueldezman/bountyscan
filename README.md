@@ -10,7 +10,7 @@ Forked from [dev-kp-eloper/BountyScout](https://github.com/dev-kp-eloper/BountyS
 
 1. **Scheduled trigger** — GitHub Actions cron fires at `17 * * * *` (17 minutes past each hour).
 2. **Scouts GitHub** — Runs explicit-paid bounty searches instead of broad bounty/quest/task searches.
-3. **Triages candidates** — Skips PRs, already-assigned issues, overcrowded threads (>25 comments), spam keywords, false-positive bounty-system tickets, and issues that fail the linked-PR recency rule.
+3. **Triages candidates** — Skips PRs, already-assigned issues, overcrowded threads (>5 comments), spam keywords, false-positive bounty-system tickets, and issues that fail the linked-PR recency rule.
 4. **Deduplicates** — Compares against `seen_bounties.json`; only surfaces truly new entries.
 5. **Notifies** — Dispatches via your configured channel(s).
 6. **Persists state** — Commits updated `seen_bounties.json` back to the repo so you never get duplicates.
@@ -62,7 +62,7 @@ The scanner runs these query groups by default, focused on explicit paid opportu
 | Generic | `bounty reward`, `bounty paid`, `bounty prize`, `bounty grant`, `bounty payout`, `paid issue` |
 | Paid signals | `reward $`, `reward USDC`, `reward ETH`, `up for grabs reward` |
 | Platforms | `Opire reward`, `Gitcoin grant`, `Superfluid bounty reward`, `Dework task reward`, `hackathon prize TypeScript` |
-| Targeted repos | `repo:codegraphtheory/hermes-profile-template` + `user:codegraphtheory` paid bounty/grant/prize searches |
+| Targeted repos | `repo:codegraphtheory/hermes-profile-template` + `user:codegraphtheory` paid bounty/grant/prize searches, plus `repo:topoteretes/cognee label:hackathon` |
 
 Edit `SEARCH_QUERIES` in `scout_bounties.py` to add or remove terms. Adjust `RECENT_WINDOW_HOURS` if you want a different recent-issue window.
 
@@ -75,6 +75,7 @@ Issues are dropped if they contain any of: `airdrop`, `referral`, `casino`, `gam
 Edit `BLOCKLIST` in `scout_bounties.py` to tune.
 
 Issues are also dropped unless they contain explicit payment signals such as `reward`, `paid`, `prize`, `grant`, `payout`, `payment`, or a money/token amount. A `bounty` mention or label helps, but is not enough on its own.
+The current exception is `topoteretes/cognee` issues labeled `hackathon`, which are intentionally included as a targeted source.
 
 Excluded labels currently include: `GRANTFOX OSS`, `GrantFox OSS campaign`, `MAYBE REWARDED`, `OFFICIAL CAMPAIGN`, `Stellar Wave`, and `drips-wave`.
 Known false-positive patterns such as `Bounty Alert`, `Create Bounty fails`, dummy test quests, and stock ticker status posts are also rejected.

@@ -9,7 +9,7 @@ from datetime import datetime, timedelta, timezone
 
 # ─── Configuration ────────────────────────────────────────────────────────────
 STATE_FILE = "seen_bounties.json"
-MAX_COMMENTS = 25  # skip overcrowded / already-competitive threads
+MAX_COMMENTS = 5  # skip overcrowded / already-competitive threads
 MAX_LINKED_PRS = 1
 RECENT_WINDOW_HOURS = 1
 TELEGRAM_MESSAGE_LIMIT = 3500
@@ -45,6 +45,8 @@ SEARCH_QUERIES = [
     'is:issue is:open user:codegraphtheory bounty reward sort:updated-desc',
     'is:issue is:open user:codegraphtheory bounty paid sort:updated-desc',
     'is:issue is:open user:codegraphtheory grant prize sort:updated-desc',
+    # Targeted hackathon-tagged issues for cognee
+    'is:issue is:open repo:topoteretes/cognee label:hackathon sort:updated-desc',
 ]
 
 # ─── Spam / noise blocklist ───────────────────────────────────────────────────
@@ -57,7 +59,7 @@ BLOCKLIST = [
 STRONG_BOUNTY_TERMS = [
     "reward", "rewards", "paid", "prize", "prizes", "grant", "grants",
     "payment", "payments", "paying", "payout", "payouts", "compensation",
-    "compensated", "stipend", "stipends", "hackathon", "up for grabs",
+    "compensated", "stipend", "stipends", "up for grabs",
     "opire", "gitcoin", "superfluid", "dework",
 ]
 
@@ -100,6 +102,9 @@ REPO_BLOCKLIST = [
 ]
 
 TICKER_STATUS_RE = re.compile(r"^[^\w]*[A-Z]{2,5}\s+[—-]\s+\d{4}-\d{2}-\d{2}\s+\(OK\)$")
+TARGETED_HACKATHON_REPOS = {
+    "topoteretes/cognee",
+}
 
 
 def load_seen_bounties() -> set:
@@ -234,6 +239,15 @@ def has_bounty_signal(item: dict) -> bool:
     return has_context or has_bounty_label or has_work_cue
 
 
+def is_targeted_hackathon_issue(item: dict) -> bool:
+    repo = item.get("repository_url", "").replace("https://api.github.com/repos/", "").lower()
+    if repo not in TARGETED_HACKATHON_REPOS:
+        return False
+
+    label_names = extract_label_names(item)
+    return "hackathon" in label_names
+
+
 def is_clean_candidate(item: dict) -> bool:
     # Skip pull requests
     if "pull_request" in item:
@@ -270,7 +284,7 @@ def is_clean_candidate(item: dict) -> bool:
     if TICKER_STATUS_RE.match(str(item.get("title", "")).strip()):
         return False
 
-    if not has_bounty_signal(item):
+    if not has_bounty_signal(item) and not is_targeted_hackathon_issue(item):
         return False
 
     return True
